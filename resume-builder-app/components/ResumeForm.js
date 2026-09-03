@@ -1,315 +1,223 @@
 'use client';
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import TemplateSelector from './TemplateSelector';
-import Preview from './Preview';
-import { defaultResumeData } from '@/lib/types';
+import { emptyResumeData, flattenForTemplate } from '../lib/types';
 
-const resumeSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  address: z.string().min(1, 'Address is required'),
-  mobile: z.string().min(1, 'Mobile number is required'),
-  email: z.string().email('Invalid email address'),
-  github: z.string().optional(),
-  linkedin: z.string().optional(),
-  careerObjective: z.string().optional(),
-  professionalQualifications: z.string().optional(),
-  educationalQualifications: z.string().optional(),
-  technicalSkill: z.string().optional(),
-  title1: z.string().optional(),
-  description1: z.string().optional(),
-  role1: z.string().optional(),
-  duration1: z.string().optional(),
-  title2: z.string().optional(),
-  description2: z.string().optional(),
-  role2: z.string().optional(),
-  duration2: z.string().optional(),
-  coCurricularActivities: z.string().optional(),
-  reward: z.string().optional(),
-  certifications: z.string().optional(),
-  strengths: z.string().optional(),
-  areasOfImprovement: z.string().optional(),
-  hobbies: z.string().optional(),
-  areaOfInterest: z.string().optional(),
-  dateOfBirth: z.string().optional(),
-  gender: z.string().optional(),
-  nationality: z.string().optional(),
-  maritalStatus: z.string().optional(),
-  language: z.string().optional(),
-  motherTongue: z.string().optional(),
-  fatherName: z.string().optional(),
-  passwortDetails: z.string().optional(),
-  permanentAddress: z.string().optional(),
-  reference: z.string().optional(),
-  declaration: z.string().optional(),
-  currentDate: z.string().optional(),
-  place: z.string().optional(),
-});
+const TEXT_FIELDS = [
+  { key: 'name', label: 'Full Name' },
+  { key: 'Address', label: 'Address' },
+  { key: 'Mobile', label: 'Mobile Number' },
+  { key: 'email', label: 'Email' },
+  { key: 'github', label: 'GitHub URL' },
+  { key: 'linkedin', label: 'LinkedIn URL' },
+];
 
-export default function ResumeForm() {
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [documentType, setDocumentType] = useState('word');
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewData, setPreviewData] = useState(null);
+const ACADEMIC_FIELDS = [
+  { key: 'careerObjective', label: 'Career Objective', textarea: true },
+  { key: 'ProfessionalQualifications', label: 'Professional Qualification', textarea: true },
+  { key: 'educationalQualifications', label: 'Educational Qualifications', textarea: true },
+  { key: 'technicalSkill', label: 'Technical Skills', textarea: true },
+];
 
-  const { register, handleSubmit, formState: { errors }, getValues, watch } = useForm({
-    resolver: zodResolver(resumeSchema),
-    defaultValues: defaultResumeData,
-  });
+const OTHER_FIELDS = [
+  { key: 'coCurricularActivities', label: 'Co-curricular Activities', textarea: true },
+  { key: 'reward', label: 'Reward & Accolades', textarea: true },
+  { key: 'certifications', label: 'Certifications', textarea: true },
+  { key: 'strengths', label: 'Strengths' },
+  { key: 'areasOfImprovement', label: 'Areas of Improvement' },
+  { key: 'hobbies', label: 'Hobbies' },
+  { key: 'areaOfInterest', label: 'Areas of Interest' },
+];
 
-  const formData = watch();
+const PERSONAL_FIELDS = [
+  { key: 'dateOfBirth', label: 'Date of Birth' },
+  { key: 'gender', label: 'Gender' },
+  { key: 'nationality', label: 'Nationality' },
+  { key: 'maritalStatus', label: 'Marital Status' },
+  { key: 'language', label: 'Languages Known' },
+  { key: 'motherTongue', label: 'Mother Tongue' },
+  { key: 'fatherName', label: "Father's Name" },
+  { key: 'passwortDetails', label: 'Passport Details' },
+  { key: 'permanentAddress', label: 'Permanent Address' },
+];
 
-  const onSubmit = async (data) => {
-    setIsGenerating(true);
-    try {
-      const response = await fetch('/api/generate-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data, type: documentType }),
-      });
+const FOOTER_FIELDS = [
+  { key: 'reference', label: 'References', textarea: true },
+  { key: 'declaration', label: 'Declaration', textarea: true },
+  { key: 'currentDate', label: 'Date' },
+  { key: 'place', label: 'Place' },
+];
 
-      if (!response.ok) throw new Error('Failed to generate document');
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const extension = documentType === 'word' ? 'docx' : 'html';
-      a.download = `${data.name.replace(/\s+/g, '_')}_Resume.${extension}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Failed to generate document. Please try again.');
-    } finally {
-      setIsGenerating(false);
-    }
+function Field({ field, value, onChange }) {
+  const commonProps = {
+    id: field.key,
+    name: field.key,
+    value: value ?? '',
+    onChange: (e) => onChange(field.key, e.target.value),
   };
-
-  const handlePreview = () => {
-    const data = getValues();
-    setPreviewData(data);
-    setShowPreview(true);
-  };
-
-  const renderField = (label, name, placeholder = '', type = 'text') => (
-    <div className="form-group">
-      <label className="form-label">{label}</label>
-      {type === 'textarea' ? (
-        <textarea
-          {...register(name)}
-          placeholder={placeholder}
-          className="form-textarea"
-          rows="3"
-        />
+  return (
+    <div className="field">
+      <label htmlFor={field.key}>{field.label}</label>
+      {field.textarea ? (
+        <textarea rows={3} {...commonProps} />
       ) : (
-        <input
-          {...register(name)}
-          type={type}
-          placeholder={placeholder}
-          className="form-input"
-        />
-      )}
-      {errors[name] && (
-        <p style={{ color: '#ef4444', fontSize: '0.875rem', marginTop: '0.25rem' }}>
-          {errors[name].message}
-        </p>
+        <input type="text" {...commonProps} />
       )}
     </div>
   );
+}
 
-  const renderEntry = (fields, title, addButtonText, fieldsConfig) => {
-    // Simplified version - you can expand as needed
-    return (
-      <div className="card">
-        <div className="section-title">{title}</div>
-        {fields.map((field, index) => (
-          <div key={field.id} className="entry-card">
-            <div className="entry-header">
-              <h4 style={{ fontWeight: '600', color: '#4b5563' }}>Entry {index + 1}</h4>
-              <button
-                type="button"
-                className="btn btn-danger"
-                style={{ padding: '0.25rem 0.75rem', fontSize: '0.875rem' }}
-              >
-                Remove
-              </button>
-            </div>
-            <div className="grid-2">
-              {fieldsConfig.map((config) => (
-                <div key={config.name}>
-                  <label className="form-label">{config.label}</label>
-                  <input
-                    {...register(`${title.toLowerCase()}.${index}.${config.name}`)}
-                    placeholder={config.placeholder}
-                    className="form-input"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-        <button type="button" className="btn btn-secondary" style={{ width: '100%' }}>
-          + {addButtonText}
-        </button>
+function ProjectFields({ title, project, onChange }) {
+  const update = (key, value) => onChange({ ...project, [key]: value });
+  return (
+    <fieldset className="project-fieldset">
+      <legend>{title}</legend>
+      <div className="field">
+        <label>Title</label>
+        <input
+          type="text"
+          value={project.title}
+          onChange={(e) => update('title', e.target.value)}
+        />
       </div>
-    );
-  };
+      <div className="field">
+        <label>Description</label>
+        <textarea
+          rows={2}
+          value={project.description}
+          onChange={(e) => update('description', e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>Role</label>
+        <input
+          type="text"
+          value={project.role}
+          onChange={(e) => update('role', e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label>Duration</label>
+        <input
+          type="text"
+          value={project.duration}
+          onChange={(e) => update('duration', e.target.value)}
+        />
+      </div>
+    </fieldset>
+  );
+}
+
+export default function ResumeForm() {
+  const [form, setForm] = useState(emptyResumeData());
+  const [loading, setLoading] = useState(null); // 'docx' | 'pdf' | null
+  const [error, setError] = useState('');
+
+  const setField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const setProject = (key) => (project) => setForm((prev) => ({ ...prev, [key]: project }));
+
+  async function handleDownload(format) {
+    setError('');
+    setLoading(format);
+    try {
+      const payload = { data: flattenForTemplate(form), format };
+
+      const res = await fetch('/api/generate-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Request failed with status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = (form.name || 'resume').replace(/[^a-zA-Z0-9_-]+/g, '_') || 'resume';
+      a.href = url;
+      a.download = `${safeName}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || 'Something went wrong while generating the file.');
+    } finally {
+      setLoading(null);
+    }
+  }
 
   return (
-    <div className="container" style={{ padding: '2rem 0' }}>
-      <div className="card">
-        <h1 style={{ fontSize: '2rem', fontWeight: 'bold', textAlign: 'center', marginBottom: '0.5rem' }}>
-          📄 Resume Builder
-        </h1>
-        <p style={{ textAlign: 'center', color: '#6b7280' }}>
-          Fill in your details and download your professional resume
-        </p>
+    <form
+      className="resume-form"
+      onSubmit={(e) => e.preventDefault()}
+    >
+      <section>
+        <h2>Basic Details</h2>
+        <div className="grid">
+          {TEXT_FIELDS.map((f) => (
+            <Field key={f.key} field={f} value={form[f.key]} onChange={setField} />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2>Academic Record</h2>
+        {ACADEMIC_FIELDS.map((f) => (
+          <Field key={f.key} field={f} value={form[f.key]} onChange={setField} />
+        ))}
+      </section>
+
+      <section>
+        <h2>Projects</h2>
+        <ProjectFields title="Minor Project" project={form.project1} onChange={setProject('project1')} />
+        <ProjectFields title="Other Project" project={form.project2} onChange={setProject('project2')} />
+      </section>
+
+      <section>
+        <h2>Activities & Skills</h2>
+        {OTHER_FIELDS.map((f) => (
+          <Field key={f.key} field={f} value={form[f.key]} onChange={setField} />
+        ))}
+      </section>
+
+      <section>
+        <h2>Personal Details</h2>
+        <div className="grid">
+          {PERSONAL_FIELDS.map((f) => (
+            <Field key={f.key} field={f} value={form[f.key]} onChange={setField} />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2>References & Declaration</h2>
+        {FOOTER_FIELDS.map((f) => (
+          <Field key={f.key} field={f} value={form[f.key]} onChange={setField} />
+        ))}
+      </section>
+
+      {error && <p className="error">{error}</p>}
+
+      <div className="actions">
+        <button
+          type="button"
+          disabled={loading !== null}
+          onClick={() => handleDownload('docx')}
+        >
+          {loading === 'docx' ? 'Generating...' : 'Download Word (.docx)'}
+        </button>
+        <button
+          type="button"
+          disabled={loading !== null}
+          onClick={() => handleDownload('pdf')}
+        >
+          {loading === 'pdf' ? 'Generating...' : 'Download PDF'}
+        </button>
       </div>
-
-      <form onSubmit={handleSubmit(onSubmit)}>
-        {/* Template Selector */}
-        <TemplateSelector />
-
-        {/* Personal Information */}
-        <div className="card">
-          <h2 className="section-title">Personal Information</h2>
-          <div className="grid-2">
-            {renderField('Full Name *', 'name', 'Rahul Sharma')}
-            {renderField('Address *', 'address', '123, Main Street, City')}
-            {renderField('Mobile Number *', 'mobile', '+91 98765 43210')}
-            {renderField('Email *', 'email', 'rahul@example.com', 'email')}
-            {renderField('GitHub Profile', 'github', 'https://github.com/username')}
-            {renderField('LinkedIn Profile', 'linkedin', 'https://linkedin.com/in/username')}
-          </div>
-        </div>
-
-        {/* Career Objective */}
-        <div className="card">
-          <h2 className="section-title">Career Objective</h2>
-          {renderField('Career Objective', 'careerObjective', 'Seeking a challenging position...', 'textarea')}
-        </div>
-
-        {/* Academic Record */}
-        <div className="card">
-          <h2 className="section-title">Academic Record</h2>
-          {renderField('Professional Qualifications', 'professionalQualifications', 'B.Tech, MBA etc.', 'textarea')}
-          {renderField('Educational Qualifications', 'educationalQualifications', '10th, 12th, Graduation details', 'textarea')}
-          {renderField('Technical Skills', 'technicalSkill', 'Java, Python, React, etc.', 'textarea')}
-        </div>
-
-        {/* Projects */}
-        <div className="card">
-          <h2 className="section-title">Projects</h2>
-          <div className="grid-2">
-            {renderField('Project 1 - Title', 'title1', 'Resume Builder')}
-            {renderField('Project 1 - Description', 'description1', 'Brief description', 'textarea')}
-            {renderField('Project 1 - Role', 'role1', 'Developer')}
-            {renderField('Project 1 - Duration', 'duration1', 'Jan 2024 - Mar 2024')}
-          </div>
-          <hr className="section-divider" />
-          <div className="grid-2">
-            {renderField('Project 2 - Title', 'title2', 'E-commerce Website')}
-            {renderField('Project 2 - Description', 'description2', 'Brief description', 'textarea')}
-            {renderField('Project 2 - Role', 'role2', 'Lead Developer')}
-            {renderField('Project 2 - Duration', 'duration2', 'Apr 2024 - Jun 2024')}
-          </div>
-        </div>
-
-        {/* Activities */}
-        <div className="card">
-          <h2 className="section-title">Activities & Achievements</h2>
-          {renderField('Co-curricular Activities', 'coCurricularActivities', 'Debate club, Sports, etc.', 'textarea')}
-          {renderField('Reward & Accolades', 'reward', 'Best Employee, Academic Excellence', 'textarea')}
-          {renderField('Certifications', 'certifications', 'AWS Certified, Google IT Support', 'textarea')}
-        </div>
-
-        {/* Personal Attributes */}
-        <div className="card">
-          <h2 className="section-title">Personal Attributes</h2>
-          <div className="grid-2">
-            {renderField('Strengths', 'strengths', 'Team player, Quick learner')}
-            {renderField('Areas of Improvement', 'areasOfImprovement', 'Public speaking, Time management')}
-            {renderField('Hobbies', 'hobbies', 'Reading, Photography')}
-            {renderField('Areas of Interest', 'areaOfInterest', 'AI/ML, Cloud Computing')}
-          </div>
-        </div>
-
-        {/* Personal Details */}
-        <div className="card">
-          <h2 className="section-title">Personal Details</h2>
-          <div className="grid-2">
-            {renderField('Date of Birth', 'dateOfBirth', '01/01/1990')}
-            {renderField('Gender', 'gender', 'Male/Female/Other')}
-            {renderField('Nationality', 'nationality', 'Indian')}
-            {renderField('Marital Status', 'maritalStatus', 'Single/Married')}
-            {renderField('Languages Known', 'language', 'English, Hindi')}
-            {renderField('Mother Tongue', 'motherTongue', 'Hindi')}
-            {renderField("Father's Name", 'fatherName', 'Mr. XYZ')}
-            {renderField('Passport Details', 'passwortDetails', 'Passport Number, Issue Date')}
-            {renderField('Permanent Address', 'permanentAddress', 'Full address', 'textarea')}
-          </div>
-        </div>
-
-        {/* References */}
-        <div className="card">
-          <h2 className="section-title">References & Declaration</h2>
-          {renderField('References', 'reference', 'Contact details of references', 'textarea')}
-          {renderField('Declaration', 'declaration', 'I hereby declare...', 'textarea')}
-          <div className="grid-2">
-            {renderField('Date', 'currentDate', new Date().toLocaleDateString('en-IN'))}
-            {renderField('Place', 'place', 'City, State')}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="radio"
-                value="word"
-                checked={documentType === 'word'}
-                onChange={() => setDocumentType('word')}
-              />
-              <span>Word (.docx)</span>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="radio"
-                value="pdf"
-                checked={documentType === 'pdf'}
-                onChange={() => setDocumentType('pdf')}
-              />
-              <span>PDF</span>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <button
-              type="button"
-              onClick={handlePreview}
-              className="btn btn-secondary"
-            >
-              👁️ Preview
-            </button>
-            <button
-              type="submit"
-              disabled={isGenerating}
-              className="btn btn-primary"
-            >
-              {isGenerating ? 'Generating...' : `📥 Download ${documentType === 'word' ? 'Word' : 'PDF'}`}
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <Preview isOpen={showPreview} onClose={() => setShowPreview(false)} data={previewData} />
-    </div>
+    </form>
   );
 }

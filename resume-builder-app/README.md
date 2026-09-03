@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Resume Generator (Next.js)
 
-## Getting Started
+Fills your college `.docx` template with the user's form data — it never builds a
+new document, it only replaces the `{{placeholders}}` already inside
+`template/ressumetemp.docx`. That same filled `.docx` is then converted to PDF,
+so both downloads come from one source of truth.
 
-First, run the development server:
+## How data flows
+
+```
+ResumeForm (browser)
+  -> POST /api/generate-document  { data, format }
+      -> lib/ressumemegeratarator.js
+          -> generateDocxBuffer(data)   // Docxtemplater injects data into template/ressumetemp.docx
+          -> generatePdfBuffer(data)    // same docx buffer -> LibreOffice headless -> PDF
+      -> route.js streams the file back with Content-Disposition: attachment
+```
+
+## 1. Install dependencies
+
+```bash
+npm install
+```
+
+## 2. Install LibreOffice (required only for PDF export)
+
+`docxtemplater` only edits the `.docx` XML — it can't render a PDF by itself.
+To convert the filled `.docx` to a real PDF, this project shells out to
+LibreOffice's headless mode via the `libreoffice-convert` package. Word
+downloads work with no extra setup; PDF downloads need `soffice` on the machine
+running `npm run dev` / your server.
+
+- **Ubuntu/Debian**: `sudo apt-get install libreoffice`
+- **macOS**: `brew install --cask libreoffice`
+- **Windows**: install LibreOffice and make sure `soffice.exe` is on PATH
+- **Docker/production**: use a base image that already has LibreOffice
+  installed, or add it in your Dockerfile, e.g.:
+  ```dockerfile
+  RUN apt-get update && apt-get install -y libreoffice --no-install-recommends
+  ```
+- **Serverless hosts without LibreOffice (e.g. plain Vercel functions)**: these
+  can't run `soffice`. Either deploy on a normal Node server/VM/Docker
+  container, or swap `generatePdfBuffer` in `lib/ressumemegeratarator.js` to
+  call an external conversion service (e.g. a small Gotenberg container, or a
+  cloud conversion API) instead of `libreoffice-convert`.
+
+## 3. Run it
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000, fill the form, and click **Download Word (.docx)**
+or **Download PDF**.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Editing the template
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The template lives at `template/ressumetemp.docx`. Its placeholders are:
 
-## Learn More
+```
+name, Address, Mobile, email, github, linkedin, careerObjective,
+ProfessionalQualifications, educationalQualifications, technicalSkill,
+title1, description1, role1, duration1,
+title2, description2, role2, duration2,
+coCurricularActivities, reward, certifications, strengths,
+areasOfImprovement, hobbies, areaOfInterest,
+dateOfBirth, gender, nationality, maritalStatus, language, motherTongue,
+fatherName, passwortDetails, permanentAddress,
+reference, declaration, currentDate, place
+```
 
-To learn more about Next.js, take a look at the following resources:
+If you add/rename/remove a `{{placeholder}}` in the `.docx`:
+1. Update `lib/types.js` (`emptyResumeData`, `flattenForTemplate`).
+2. Update the field lists in `components/ResumeForm.js`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Important when editing the .docx in Word:** if you retype a `{{tag}}` and
+Word's autocorrect/spellcheck splits it across multiple runs, docxtemplater
+won't find it. Easiest fix: type the whole `{{tagName}}` in a plain-text editor
+first, or turn off autocorrect, then paste it in as one block, then re-save.

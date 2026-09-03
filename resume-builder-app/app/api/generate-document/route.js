@@ -1,35 +1,57 @@
 import { NextResponse } from 'next/server';
-import { generateResume } from '@/lib/generateResume';
+import { generateDocxBuffer, generatePdfBuffer } from '../../../lib/ressumemegeratarator';
+
+// Force the Node.js runtime (not Edge) — fs / child_process / libreoffice need it.
+export const runtime = 'nodejs';
 
 export async function POST(request) {
+  let body;
   try {
-    const { data, format } = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
-    if (!data || !data.name) {
-      return NextResponse.json(
-        { error: 'Name is required' },
-        { status: 400 }
-      );
+  const { data, format } = body || {};
+
+  if (!data || typeof data !== 'object') {
+    return NextResponse.json({ error: 'Missing "data" object' }, { status: 400 });
+  }
+  if (format !== 'docx' && format !== 'pdf') {
+    return NextResponse.json(
+      { error: 'Invalid "format": must be "docx" or "pdf"' },
+      { status: 400 }
+    );
+  }
+
+  const safeName = String(data.name || 'resume')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .slice(0, 60) || 'resume';
+
+  try {
+    if (format === 'docx') {
+      const buffer = generateDocxBuffer(data);
+      return new NextResponse(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="${safeName}.docx"`,
+        },
+      });
     }
 
-    const blob = await generateResume(data, format || 'docx');
-    const ext = format === 'pdf' ? 'pdf' : 'docx';
-    const contentType = format === 'pdf' 
-      ? 'application/pdf' 
-      : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-    return new NextResponse(blob, {
+    const pdfBuffer = await generatePdfBuffer(data);
+    return new NextResponse(pdfBuffer, {
+      status: 200,
       headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${data.name.replace(/\s+/g, '_')}_Resume.${ext}"`,
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${safeName}.pdf"`,
       },
     });
-
-  } catch (error) {
-    console.error('API Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to generate' },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error('generate-document error:', err);
+    return NextResponse.json({ error: err.message || 'Generation failed' }, { status: 500 });
   }
 }
