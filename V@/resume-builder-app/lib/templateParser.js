@@ -2,55 +2,60 @@ import fs from 'fs';
 import PizZip from 'pizzip';
 
 /**
- * @typedef {Object} TemplateVariable
- * @property {string} name
- * @property {'text' | 'image'} type
- */
-
-/**
- * @param {string} filePath - path to a .docx file already sanitized by sanitizeTemplate.js
- * @returns {TemplateVariable[]}
+ * Parses template variables WITHOUT modifying the DOCX
+ * Reads directly from the raw file
  */
 export function parseTemplateVariables(filePath) {
   const content = fs.readFileSync(filePath);
   const zip = new PizZip(content);
-  const xmlFile = zip.file('word/document.xml');
-  if (!xmlFile) {
-    throw new Error('Not a valid .docx file (word/document.xml missing)');
+  
+  // Get ALL text from ALL XML files
+  const xmlFiles = zip.file(/\.xml$/);
+  const allTexts = [];
+  
+  for (const file of xmlFiles) {
+    const fileName = file.name;
+    // Only process Word XML files
+    if (!fileName.startsWith('word/') && !fileName.startsWith('customXml/')) continue;
+    
+    const xml = file.asText();
+    // Extract text from all w:t tags
+    const wtRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+    let match;
+    while ((match = wtRegex.exec(xml)) !== null) {
+      let text = match[1];
+      // Decode XML entities
+      text = text
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+      allTexts.push(text);
+    }
   }
-  const xml = xmlFile.asText();
-
-  const texts = [];
-  const wtRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
-  let m;
-  while ((m = wtRegex.exec(xml)) !== null) {
-    texts.push(decodeXmlEntities(m[1]));
-  }
-  const fullText = texts.join('');
-
-  /** @type {Map<string, TemplateVariable>} */
+  
+  // Join all text and find variables
+  const fullText = allTexts.join('');
+  
+  // Find text variables: {{name}}
+  const textRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+  const imageRegex = /\{%\s*([a-zA-Z0-9_]+)\s*\}/g;
+  
   const variables = new Map();
-
-  const textVarRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-  let vm;
-  while ((vm = textVarRegex.exec(fullText)) !== null) {
-    if (!variables.has(vm[1])) variables.set(vm[1], { name: vm[1], type: 'text' });
+  let match;
+  
+  while ((match = textRegex.exec(fullText)) !== null) {
+    const name = match[1];
+    if (!variables.has(name)) {
+      variables.set(name, { name, type: 'text' });
+    }
   }
-
-  // Image tags use docxtemplater-image-module syntax: {%tagName}
-  const imageVarRegex = /\{%\s*([a-zA-Z0-9_]+)\s*\}/g;
-  while ((vm = imageVarRegex.exec(fullText)) !== null) {
-    variables.set(vm[1], { name: vm[1], type: 'image' }); // image wins if name collides
+  
+  while ((match = imageRegex.exec(fullText)) !== null) {
+    const name = match[1];
+    variables.set(name, { name, type: 'image' });
   }
-
+  
   return Array.from(variables.values());
-}
-
-function decodeXmlEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
 }

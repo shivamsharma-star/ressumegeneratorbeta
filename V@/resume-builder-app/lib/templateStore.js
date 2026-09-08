@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import PizZip from 'pizzip';
-import { sanitizeDocumentXml } from './sanitizeTemplate';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -28,35 +27,47 @@ function writeManifest(list) {
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(list, null, 2), 'utf-8');
 }
 
-/** Runs sanitizeDocumentXml on the .docx buffer's word/document.xml before it's ever saved. */
-function sanitizeDocxBuffer(buffer) {
-  const zip = new PizZip(buffer);
-  const xmlFile = zip.file('word/document.xml');
-  if (!xmlFile) return buffer; // not a real docx; let downstream code raise a clearer error
-  const fixedXml = sanitizeDocumentXml(xmlFile.asText());
-  zip.file('word/document.xml', fixedXml);
-  return zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+function validateDocx(buffer) {
+  try {
+    const zip = new PizZip(buffer);
+    if (!zip.file('word/document.xml')) {
+      throw new Error('Invalid DOCX: missing word/document.xml');
+    }
+    return true;
+  } catch (err) {
+    throw new Error(`Invalid DOCX file: ${err.message}`);
+  }
 }
 
 function saveTemplateInternal({ name, buffer }) {
   ensureDirs();
-  const sanitized = sanitizeDocxBuffer(buffer);
+  
+  // Validate but DON'T modify
+  validateDocx(buffer);
+  
   const id = crypto.randomUUID();
   const fileName = `${id}.docx`;
-  fs.writeFileSync(path.join(UPLOADS_DIR, fileName), sanitized);
+  const filePath = path.join(UPLOADS_DIR, fileName);
+  
+  // Save AS-IS without any modification
+  fs.writeFileSync(filePath, buffer);
 
   const list = readManifestRaw();
   const record = { id, name, fileName, uploadedAt: new Date().toISOString() };
   list.push(record);
   writeManifest(list);
+  console.log(`✅ Template saved: ${name} (${id})`);
   return record;
 }
 
-/** First run convenience: if no templates exist yet, seed the sample template so the app isn't empty. */
 function seedIfEmpty() {
   const list = readManifestRaw();
   if (list.length > 0) return;
-  if (!fs.existsSync(SEED_TEMPLATE_PATH)) return;
+  if (!fs.existsSync(SEED_TEMPLATE_PATH)) {
+    console.warn('No seed template found at:', SEED_TEMPLATE_PATH);
+    return;
+  }
+  console.log('🌱 Seeding default template...');
   const buffer = fs.readFileSync(SEED_TEMPLATE_PATH);
   saveTemplateInternal({ name: 'Default College Resume', buffer });
 }
@@ -88,5 +99,6 @@ export function deleteTemplate(id) {
   writeManifest(list);
   const filePath = path.join(UPLOADS_DIR, removed.fileName);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  console.log(`🗑️ Template deleted: ${removed.name}`);
   return true;
 }

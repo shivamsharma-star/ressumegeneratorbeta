@@ -1,87 +1,172 @@
-/**
- * Word/autocorrect frequently splits a placeholder like {{name}} into several
- * <w:t> runs (e.g. "{{na" + "me}}"), which breaks both our variable parser and
- * docxtemplater's rendering. This scans each paragraph, finds any {{...}} or
- * {%...} pattern that spans multiple <w:t> nodes, and merges it back into a
- * single run so the rest of the pipeline never has to worry about it.
- *
- * This runs once, automatically, whenever an admin uploads a template.
- */
+import PizZip from 'pizzip';
 
 const TAG_PATTERN = /\{\{[^{}]*\}\}|\{%[^{}]*\}/g;
 
-export function sanitizeDocumentXml(xml) {
-  return xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, mergeSplitTagsInParagraph);
+/**
+ * ULTIMATE sanitizer - processes EVERY XML file in the DOCX
+ * including headers, footers, footnotes, endnotes, and custom XML
+ */
+export function sanitizeAllDocxXml(buffer) {
+  const zip = new PizZip(buffer);
+  const allFiles = zip.file(/\.xml$/);
+  let changed = false;
+  
+  for (const file of allFiles) {
+    const fileName = file.name;
+    // Skip files that don't contain text
+    if (!fileName.includes('word/') && !fileName.includes('customXml/')) continue;
+    
+    const content = file.asText();
+    // Skip if no text runs
+    if (!content.includes('<w:t>')) continue;
+    
+    // Check if any tags exist in this file
+    const hasTags = TAG_PATTERN.test(content);
+    TAG_PATTERN.lastIndex = 0; // Reset regex
+    if (!hasTags) continue;
+    
+    const sanitized = sanitizeXml(content);
+    if (sanitized !== content) {
+      zip.file(fileName, sanitized);
+      changed = true;
+      console.log(`✅ Sanitized: ${fileName}`);
+    }
+  }
+  
+  return changed ? zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }) : buffer;
 }
 
-function mergeSplitTagsInParagraph(paragraphXml) {
-  const wtRegex = /<w:t([^>]*)>([\s\S]*?)<\/w:t>/g;
-  const nodes = [];
-  let m;
-  while ((m = wtRegex.exec(paragraphXml)) !== null) {
-    nodes.push({
-      attrs: m[1],
-      text: decodeXmlEntities(m[2]),
-      matchStart: m.index,
-      matchEnd: m.index + m[0].length,
+function sanitizeXml(xml) {
+  // Process each paragraph separately
+  let result = xml;
+  const paragraphRegex = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
+  const paragraphs = [];
+  let match;
+  
+  while ((match = paragraphRegex.exec(xml)) !== null) {
+    paragraphs.push({
+      text: match[0],
+      index: match.index,
+      length: match[0].length
     });
   }
+  
+  // Process paragraphs from end to start to maintain positions
+  for (let i = paragraphs.length - 1; i >= 0; i--) {
+    const para = paragraphs[i];
+    const fixed = fixParagraph(para.text);
+    if (fixed !== para.text) {
+      result = result.slice(0, para.index) + fixed + result.slice(para.index + para.length);
+    }
+  }
+  
+  return result;
+}
+
+function fixParagraph(paragraphXml) {
+  // Extract all text runs
+  const wtRegex = /<w:t([^>]*)>([\s\S]*?)<\/w:t>/g;
+  const nodes = [];
+  let match;
+  
+  while ((match = wtRegex.exec(paragraphXml)) !== null) {
+    nodes.push({
+      attrs: match[1],
+      text: decodeXmlEntities(match[2]),
+      start: match.index,
+      end: match.index + match[0].length,
+      fullMatch: match[0]
+    });
+  }
+  
   if (nodes.length < 2) return paragraphXml;
-
-  let concatenated = '';
-  const charNodeMap = [];
-  const nodeCharOffset = [];
+  
+  // Build concatenated text with node mapping
+  let fullText = '';
+  const charToNode = [];
+  const nodeStart = [];
+  
   nodes.forEach((node, idx) => {
-    nodeCharOffset.push(concatenated.length);
-    for (let i = 0; i < node.text.length; i++) charNodeMap.push(idx);
-    concatenated += node.text;
+    nodeStart.push(fullText.length);
+    for (let i = 0; i < node.text.length; i++) {
+      charToNode.push(idx);
+    }
+    fullText += node.text;
   });
-
-  const nodeReplacements = new Map();
-  const nodesToClear = new Set();
-  let tm;
+  
+  // Find all tags and merge if split across nodes
+  const replacements = new Map();
+  const toClear = new Set();
+  let tagMatch;
   TAG_PATTERN.lastIndex = 0;
-  while ((tm = TAG_PATTERN.exec(concatenated)) !== null) {
-    const startIdx = tm.index;
-    const endIdx = tm.index + tm[0].length - 1;
-    const startNode = charNodeMap[startIdx];
-    const endNode = charNodeMap[endIdx];
-    if (startNode === endNode) continue; // not split, leave untouched
-
-    const localStart = startIdx - nodeCharOffset[startNode];
-    const localEnd = endIdx - nodeCharOffset[endNode];
-
-    const beforeText = nodes[startNode].text.slice(0, localStart);
-    const afterText = nodes[endNode].text.slice(localEnd + 1);
-
-    nodeReplacements.set(startNode, beforeText + tm[0]);
-    for (let n = startNode + 1; n < endNode; n++) nodesToClear.add(n);
-    nodeReplacements.set(endNode, afterText);
+  
+  while ((tagMatch = TAG_PATTERN.exec(fullText)) !== null) {
+    const start = tagMatch.index;
+    const end = tagMatch.index + tagMatch[0].length - 1;
+    const startNode = charToNode[start];
+    const endNode = charToNode[end];
+    
+    // If tag is within a single node, skip
+    if (startNode === endNode) continue;
+    
+    // Calculate positions within nodes
+    const localStart = start - nodeStart[startNode];
+    const localEnd = end - nodeStart[endNode];
+    
+    // Get prefix from first node and suffix from last node
+    const prefix = nodes[startNode].text.slice(0, localStart);
+    const suffix = nodes[endNode].text.slice(localEnd + 1);
+    
+    // Replace first node's text with prefix + full tag
+    replacements.set(startNode, prefix + tagMatch[0]);
+    
+    // Clear middle nodes
+    for (let n = startNode + 1; n < endNode; n++) {
+      toClear.add(n);
+    }
+    
+    // Replace last node's text with suffix
+    replacements.set(endNode, suffix);
   }
-
-  if (nodeReplacements.size === 0) return paragraphXml;
-
+  
+  if (replacements.size === 0) return paragraphXml;
+  
+  // Apply replacements from end to start
   let result = paragraphXml;
-  const order = nodes
-    .map((n, idx) => ({ ...n, idx }))
-    .sort((a, b) => b.matchStart - a.matchStart);
-
-  for (const node of order) {
+  const sortedNodes = [...nodes].map((n, idx) => ({ ...n, idx }))
+    .sort((a, b) => b.start - a.start);
+  
+  for (const node of sortedNodes) {
     let newText = null;
-    if (nodeReplacements.has(node.idx)) newText = nodeReplacements.get(node.idx);
-    else if (nodesToClear.has(node.idx)) newText = '';
-    else continue;
-
-    const attrsWithoutSpace = node.attrs.replace(/\s*xml:space="[^"]*"/, '');
-    const newTag = `<w:t${attrsWithoutSpace} xml:space="preserve">${escapeXml(newText)}</w:t>`;
-    result = result.slice(0, node.matchStart) + newTag + result.slice(node.matchEnd);
+    if (replacements.has(node.idx)) {
+      newText = replacements.get(node.idx);
+    } else if (toClear.has(node.idx)) {
+      newText = '';
+    } else {
+      continue;
+    }
+    
+    // Preserve attributes but ensure xml:space is set
+    let attrs = node.attrs;
+    if (!attrs.includes('xml:space="preserve"')) {
+      attrs = attrs.replace(/\s*xml:space="[^"]*"/, '');
+      attrs = attrs + ' xml:space="preserve"';
+    }
+    
+    const newTag = `<w:t${attrs}>${escapeXml(newText)}</w:t>`;
+    result = result.slice(0, node.start) + newTag + result.slice(node.end);
   }
-
+  
   return result;
 }
 
 function escapeXml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function decodeXmlEntities(str) {
