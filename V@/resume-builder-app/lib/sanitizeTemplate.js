@@ -1,8 +1,14 @@
 import PizZip from 'pizzip';
 
+// All supported tag types: {{text}}, {%image}, [[link]]
 const TAG_PATTERN = /\{\{[^{}]*\}\}|\{%[^{}]*\}|\[\[[^\[\]]*\]\]/g;
 const TAG_SEARCH = /(\{\{[^{}]*\}\}|\{%[^{}]*\}|\[\[[^\[\]]*\]\])/g;
 
+/**
+ * Sanitizes every XML file in the DOCX so that tags split across
+ * multiple <w:r> runs get merged into a single run — critical because
+ * Word often breaks "{%photo}" into "{%", "ph", "oto}".
+ */
 export function sanitizeAllDocxXml(buffer) {
   const zip = new PizZip(buffer);
   const allFiles = zip.file(/\.xml$/);
@@ -16,11 +22,9 @@ export function sanitizeAllDocxXml(buffer) {
     if (!content.includes('<w:t>')) continue;
 
     TAG_PATTERN.lastIndex = 0;
-    if (!TAG_PATTERN.test(content)) {
-      TAG_PATTERN.lastIndex = 0;
-      continue;
-    }
+    const hasTags = TAG_PATTERN.test(content);
     TAG_PATTERN.lastIndex = 0;
+    if (!hasTags) continue;
 
     const sanitized = sanitizeXml(content);
     if (sanitized !== content) {
@@ -30,7 +34,9 @@ export function sanitizeAllDocxXml(buffer) {
     }
   }
 
-  return changed ? zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }) : buffer;
+  return changed
+    ? zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
+    : buffer;
 }
 
 function sanitizeXml(xml) {
@@ -47,7 +53,8 @@ function sanitizeXml(xml) {
     const para = paragraphs[i];
     const fixed = fixParagraph(para.text);
     if (fixed !== para.text) {
-      result = result.slice(0, para.index) + fixed + result.slice(para.index + para.length);
+      result =
+        result.slice(0, para.index) + fixed + result.slice(para.index + para.length);
     }
   }
 
@@ -107,7 +114,9 @@ function fixParagraph(paragraphXml) {
   if (replacements.size === 0) return paragraphXml;
 
   let result = paragraphXml;
-  const sortedNodes = [...nodes].map((n, idx) => ({ ...n, idx })).sort((a, b) => b.start - a.start);
+  const sortedNodes = [...nodes]
+    .map((n, idx) => ({ ...n, idx }))
+    .sort((a, b) => b.start - a.start);
 
   for (const node of sortedNodes) {
     let newText = null;

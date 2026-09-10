@@ -6,36 +6,45 @@ export default function DynamicResumeForm({ templateId, templateName, variables 
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
 
+  // ───────────── TEXT ─────────────
   const handleTextChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  // ───────────── IMAGE ─────────────
   const handleImageChange = (e, name) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       alert('Image too large. Max 5MB');
       return;
     }
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       setFormData((prev) => ({ ...prev, [name]: ev.target.result }));
+      console.log(`✅ Image loaded for "${name}": ${file.name}`);
     };
-    reader.readAsDataURL(file);
+    reader.onerror = () => alert('Failed to read image');
+    reader.readAsDataURL(file); // MUST be readAsDataURL
   };
 
+  // ───────────── LINK ─────────────
   const handleLinkChange = (e, name, field) => {
     const { value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: {
-        ...(prev[name] || {}),
-        [field]: value,
-      },
+      [name]: { ...(prev[name] || {}), [field]: value },
     }));
   };
 
+  // ───────────── SUBMIT ─────────────
   const handleSubmit = async (format) => {
     setLoading(true);
     setStatus('Generating...');
@@ -74,10 +83,18 @@ export default function DynamicResumeForm({ templateId, templateName, variables 
       <h2>{templateName}</h2>
 
       {variables.map((variable) => {
+        // ───────── IMAGE ─────────
         if (variable.type === 'image') {
           return (
             <div key={variable.name} className="field">
-              <label>{prettyLabel(variable.name)} (Image)</label>
+              <label>
+                {prettyLabel(variable.name)} (Image)
+                {variable.width && variable.height && (
+                  <span style={{ color: '#888', fontWeight: 400, marginLeft: 6 }}>
+                    — {variable.width}×{variable.height}px
+                  </span>
+                )}
+              </label>
               <input
                 type="file"
                 accept="image/*"
@@ -88,12 +105,17 @@ export default function DynamicResumeForm({ templateId, templateName, variables 
                   src={formData[variable.name]}
                   alt="Preview"
                   className="photo-preview"
+                  style={{
+                    maxWidth: variable.width || 140,
+                    maxHeight: variable.height || 160,
+                  }}
                 />
               )}
             </div>
           );
         }
 
+        // ───────── LINK ─────────
         if (variable.type === 'link') {
           return (
             <div key={variable.name} className="field">
@@ -115,6 +137,7 @@ export default function DynamicResumeForm({ templateId, templateName, variables 
           );
         }
 
+        // ───────── TEXT ─────────
         return (
           <div key={variable.name} className="field">
             <label>{prettyLabel(variable.name)}</label>

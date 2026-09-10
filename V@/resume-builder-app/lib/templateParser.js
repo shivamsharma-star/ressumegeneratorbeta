@@ -27,10 +27,15 @@ export function parseTemplateVariables(filePath) {
   }
 
   const fullText = allTexts.join('');
-  console.log('🔍 Full text sample:', fullText.substring(0, 300));
+  console.log('🔍 Template text:', fullText);
 
   const textRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-  const imageRegex = /\{%\s*([a-zA-Z0-9_]+)\s*\}/g;
+
+  // ⭐ CHANGED: Image regex ab : aur , bhi capture karta hai
+  // OLD: /\{%\s*([a-zA-Z0-9_]+)\s*\}/g
+  // NEW: optional :W,H size capture karta hai
+  const imageRegex = /\{%\s*([a-zA-Z0-9_]+)\s*(?::\s*(\d+)\s*,\s*(\d+)\s*)?\}/g;
+
   const linkRegex = /\[\[\s*([a-zA-Z0-9_]+)\s*\]\]/g;
 
   const variables = new Map();
@@ -43,18 +48,23 @@ export function parseTemplateVariables(filePath) {
 
   while ((match = imageRegex.exec(fullText)) !== null) {
     const name = match[1];
-    variables.set(name, { name, type: 'image' });
+
+    // ⭐ CHANGED: Size extract karo agar diya hai, warna default 140x160
+    const width = match[2] ? parseInt(match[2], 10) : 140;
+    const height = match[3] ? parseInt(match[3], 10) : 160;
+
+    variables.set(name, { name, type: 'image', width, height });
+    console.log(`🖼️ Image: {%${name}} → ${width}×${height}`);
   }
 
   while ((match = linkRegex.exec(fullText)) !== null) {
     const name = match[1];
-    console.log(`🔗 Found link var: [[${name}]]`);
     variables.set(name, { name, type: 'link' });
+    console.log(`🔗 Link: [[${name}]]`);
   }
 
   return Array.from(variables.values());
 }
-
 
 
 

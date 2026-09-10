@@ -2,20 +2,31 @@ import mammoth from 'mammoth';
 import puppeteer from 'puppeteer';
 
 /**
- * Converts DOCX buffer → HTML → PDF
- * Auto-linkifies URLs so they become clickable
+ * Converts DOCX buffer → HTML → PDF.
+ * - Auto-linkifies URLs
+ * - Applies per-image sizes from template variables
  */
-export async function convertDocxBufferToPdf(docxBuffer) {
+export async function convertDocxBufferToPdf(docxBuffer, variables = []) {
   const { value: html } = await mammoth.convertToHtml(
     { buffer: docxBuffer },
     { convertImage: mammoth.images.inline(mammoth.images.imgElement) }
   );
 
-  // Auto-linkify bare URLs in text
+  // Auto-linkify bare URLs
   const linkedHtml = html.replace(
     /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+)/g,
     (url) => `<a href="${url}" target="_blank">${url}</a>`
   );
+
+  // Per-image size CSS
+  const imageCss = variables
+    .filter((v) => v.type === 'image')
+    .map((v) => {
+      const w = v.width || 140;
+      const h = v.height || 160;
+      return `img[alt="${v.name}"] { max-width: ${w}px; max-height: ${h}px; }`;
+    })
+    .join('\n');
 
   const fullHtml = `<!DOCTYPE html>
 <html>
@@ -33,7 +44,8 @@ export async function convertDocxBufferToPdf(docxBuffer) {
   a { color: #0066cc; text-decoration: underline; }
   h1, h2, h3 { margin: 0.6em 0 0.3em; }
   p { margin: 0.25em 0; }
-  img { max-width: 130px; max-height: 160px; object-fit: cover; }
+  img { max-width: 140px; max-height: 160px; object-fit: contain; }
+  ${imageCss}
   table { border-collapse: collapse; width: 100%; }
   td, th { padding: 2px 6px; vertical-align: top; }
 </style>
