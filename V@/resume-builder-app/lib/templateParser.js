@@ -31,9 +31,9 @@ export function parseTemplateVariables(filePath) {
 
   const textRegex = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
-  // ⭐ CHANGED: Image regex ab : aur , bhi capture karta hai
-  // OLD: /\{%\s*([a-zA-Z0-9_]+)\s*\}/g
-  // NEW: optional :W,H size capture karta hai
+  // ⭐ NEW: Size bhi capture karo
+  // {%photo}      → name only, default 140x160
+  // {%photo:50,60} → name + width + height
   const imageRegex = /\{%\s*([a-zA-Z0-9_]+)\s*(?::\s*(\d+)\s*,\s*(\d+)\s*)?\}/g;
 
   const linkRegex = /\[\[\s*([a-zA-Z0-9_]+)\s*\]\]/g;
@@ -46,30 +46,24 @@ export function parseTemplateVariables(filePath) {
     if (!variables.has(name)) variables.set(name, { name, type: 'text' });
   }
 
+  // ⭐ NEW: Size extract karo
   while ((match = imageRegex.exec(fullText)) !== null) {
     const name = match[1];
-
-    // ⭐ CHANGED: Size extract karo agar diya hai, warna default 140x160
-    const width = match[2] ? parseInt(match[2], 10) : 140;
-    const height = match[3] ? parseInt(match[3], 10) : 160;
+    const width = match[2] ? parseInt(match[2], 10) : 140;   // default 140
+    const height = match[3] ? parseInt(match[3], 10) : 160;  // default 160
 
     variables.set(name, { name, type: 'image', width, height });
-    console.log(`🖼️ Image: {%${name}} → ${width}×${height}`);
+    console.log(`🖼️ Image found: {%${name}} → ${width}×${height}`);
   }
 
   while ((match = linkRegex.exec(fullText)) !== null) {
     const name = match[1];
     variables.set(name, { name, type: 'link' });
-    console.log(`🔗 Link: [[${name}]]`);
+    console.log(`🔗 Link found: [[${name}]]`);
   }
 
   return Array.from(variables.values());
 }
-
-
-
-
-
 
 
 // import fs from 'fs';

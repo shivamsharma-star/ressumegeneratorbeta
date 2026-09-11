@@ -1,14 +1,12 @@
 import PizZip from 'pizzip';
 
-// All supported tag types: {{text}}, {%image}, [[link]]
-const TAG_PATTERN = /\{\{[^{}]*\}\}|\{%[^{}]*\}|\[\[[^\[\]]*\]\]/g;
-const TAG_SEARCH = /(\{\{[^{}]*\}\}|\{%[^{}]*\}|\[\[[^\[\]]*\]\])/g;
+// ⭐ CHANGED: Image tag mein `:50,60` bhi allow karo
+const TAG_PATTERN =
+  /\{\{[^{}]*\}\}|\{%\s*[a-zA-Z0-9_]+\s*(?::\s*\d+\s*,\s*\d+\s*)?\}|\[\[[^\[\]]*\]\]/g;
 
-/**
- * Sanitizes every XML file in the DOCX so that tags split across
- * multiple <w:r> runs get merged into a single run — critical because
- * Word often breaks "{%photo}" into "{%", "ph", "oto}".
- */
+const TAG_SEARCH =
+  /(\{\{[^{}]*\}\}|\{%\s*[a-zA-Z0-9_]+\s*(?::\s*\d+\s*,\s*\d+\s*)?\}|\[\[[^\[\]]*\]\])/g;
+
 export function sanitizeAllDocxXml(buffer) {
   const zip = new PizZip(buffer);
   const allFiles = zip.file(/\.xml$/);
@@ -153,7 +151,6 @@ function decodeXmlEntities(str) {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'");
 }
-
 
 
 // import PizZip from 'pizzip';

@@ -49,37 +49,46 @@ async function fetchImageBuffer(source) {
   return null;
 }
 
-// ─────────────────────────────────────────────────────────────
-// ⭐ NEW FUNCTION: Image sizes preprocess
-// XML mein {%photo:50,50} ko {%photo} banata hai
-// aur sizes map banata hai { photo: [50, 50] }
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// ⭐ NEW: Extract size from {%photo:50,60} and strip it
+// Returns: { buffer, imageSizes }
+// ═════════════════════════════════════════════════════════════
 function preprocessImageSizes(buffer, variables) {
+  console.log('\n═══ preprocessImageSizes START ═══');
+
   const zip = new PizZip(buffer);
   const allFiles = zip.file(/\.xml$/);
-  let changed = false;
 
-  // Parse kiye gaye variables se size map banao
-  const sizes = {};
+  // ⭐ Step 1: Build size map from parsed variables (with defaults)
+  var imageSizes = {};
   for (const v of variables) {
     if (v.type === 'image') {
-      sizes[v.name] = [v.width || 140, v.height || 160];
+      imageSizes = {width: v.width, height: v.height};
+      console.log("aaaaaaaa: ", imageSizes)
+      console.log(`📐 Initial: "${v.name}" = [${v.width}, ${v.height}]`);
     }
   }
 
-  // ⭐ Regex: {%name:W,H} match karta hai
+  // ⭐ Step 2: Regex to find {%name:W,H} in XML
   const sizeRegex = /\{%\s*([a-zA-Z0-9_]+)\s*:\s*(\d+)\s*,\s*(\d+)\s*\}/g;
 
+  let changed = false;
+
+  // ⭐ Step 3: Process EVERY XML file (document, headers, footers)
   for (const file of allFiles) {
     if (!file.name.startsWith('word/') && !file.name.startsWith('customXml/')) continue;
 
     let content = file.asText();
     let fileChanged = false;
 
-    // ⭐ XML mein {%photo:50,50} → {%photo} replace karo
+    // ⭐ ⭐ ⭐ CRITICAL: Reset lastIndex before replace
+    sizeRegex.lastIndex = 0;
+
     const newContent = content.replace(sizeRegex, (_match, name, w, h) => {
-      sizes[name] = [parseInt(w, 10), parseInt(h, 10)];
-      console.log(`🔧 Stripping size: {%${name}:${w},${h}} → {%${name}}`);
+      const width = parseInt(w, 10);
+      const height = parseInt(h, 10);
+      imageSizes[name] = [width, height];
+      console.log(`🔧 Stripped: {%${name}:${w},${h}} → {%${name}} = [${width}, ${height}]`);
       fileChanged = true;
       return `{%${name}}`;
     });
@@ -90,11 +99,14 @@ function preprocessImageSizes(buffer, variables) {
     }
   }
 
-  console.log(`📐 Final image sizes:`, JSON.stringify(sizes));
+  console.log(`📐 FINAL imageSizes:`, JSON.stringify(imageSizes));
+  console.log('═══ preprocessImageSizes END ═══\n');
 
   return {
-    buffer: changed ? zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }) : buffer,
-    sizes,
+    buffer: changed
+      ? zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
+      : buffer,
+    imageSizes,   // ⭐ Return karo
   };
 }
 
@@ -131,9 +143,9 @@ function preprocessLinks(buffer, variables, data) {
   return zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 // MAIN DOCX GENERATOR
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 export async function generateDocxBuffer(templateId, data) {
   const filePath = getTemplateFilePath(templateId);
   if (!filePath || !fs.existsSync(filePath)) {
@@ -158,10 +170,13 @@ export async function generateDocxBuffer(templateId, data) {
     `📝 ${variables.length} variables (${imageVars.length} image, ${linkVars.length} link)`
   );
 
-  // ⭐ NEW STEP: Strip size tags from XML and build size map
-  // {%photo:50,50} → {%photo} + sizes.photo = [50, 50]
-  const { buffer: sizeStrippedBuffer, sizes: imageSizes } =
+  // ⭐ 3. Extract sizes from template AND strip size tags from XML
+  const { buffer: sizeStrippedBuffer, imageSizes } =
     preprocessImageSizes(sanitizedBuffer, variables);
+
+  // ⭐ VERIFY
+  console.log(`⭐ VERIFY imageSizes:`, JSON.stringify(imageSizes));
+  console.log(`⭐ VERIFY imageSizes["photo"]:`, JSON.stringify(imageSizes["photo"]));
 
   // 4. Fetch images
   const imageBuffers = {};
@@ -177,35 +192,34 @@ export async function generateDocxBuffer(templateId, data) {
   }
 
   // 5. Preprocess links
-  // ⭐ CHANGED: sizeStrippedBuffer use karo (sanitizedBuffer nahi)
   const preprocessed = preprocessLinks(sizeStrippedBuffer, variables, data);
 
-  // 6. IMAGE MODULE
-const imageModule = new ImageModule({
-  centered: false,
-  getImage: (_tagValue, tagName) => {
-    console.log(`🖼️ getImage CALLED → tagName="${tagName}"`);
-    const buf = imageBuffers[tagName];
-    if (buf && buf.length > 0) {
-      console.log(`   ✅ Returning ${buf.length} bytes`);
-      console.log(`   📦 Buffer first 10 bytes:`, buf.slice(0, 10).toString('hex'));
-      return buf;
-    }
-    console.log(`   ⚠️ Fallback`);
-    return transparentPngBuffer();
-  },
-  getSize: (_tagValue, tagName) => {
-  // ⭐ DEBUG
-  console.log(`📐 getSize called → tagName="${tagName}"`);
-  console.log(`   typeof imageSizes:`, typeof imageSizes);
-  console.log(`   imageSizes:`, JSON.stringify(imageSizes));
-  console.log(`   imageSizes["${tagName}"]:`, JSON.stringify(imageSizes?.[tagName]));
+  // ⭐ 6. IMAGE MODULE — yahan size inject hota hai
+  const imageModule = new ImageModule({
+    centered: false,
 
-  const size = imageSizes?.[tagName] || [140, 160];
-  console.log(`   → Returning [${size[0]}, ${size[1]}]`);
-  return size;
-},
-});
+    getImage: (_tagValue, tagName) => {
+      console.log(`🖼️ getImage → tagName="${tagName}"`);
+      const buf = imageBuffers[tagName];
+      if (buf && buf.length > 0) {
+        console.log(`   ✅ Returning ${buf.length} bytes`);
+        return buf;
+      }
+      console.log(`   ⚠️ Fallback`);
+      return transparentPngBuffer();
+    },
+
+    // ⭐⭐⭐ YEH SABSE IMPORTANT — Size inject
+    getSize: (_tagValue, tagName) => {
+      // console.log(`\n📐 getSize CALLED → tagName="${tagName}"`);
+      console.log(`   imageSizes:`, imageSizes);
+      // console.log(`imagesize   imageSizes["${tagName}"]:`, JSON.stringify(imageSizes?.[tagName]));
+
+      const size = Object.values(imageSizes);
+      console.log(`   → RETURNING: [${size[0]}, ${size[1]}]\n `, size);
+      return size;
+    },
+  });
 
   // 7. Docxtemplater
   const zip = new PizZip(preprocessed);
@@ -215,9 +229,6 @@ const imageModule = new ImageModule({
     paragraphLoop: true,
     linebreaks: true,
     nullGetter: () => '',
-    // ⭐ REMOVED: delimiters option hata diya
-    // OLD: delimiters: { start: '{{', end: '}}' },
-    // Kyunki image module ko {%...%} detect karne dena hai
   });
 
   // 8. Render data
@@ -253,21 +264,6 @@ const imageModule = new ImageModule({
   console.log(`\n✅ DOCX generated: ${outputBuffer.length} bytes\n`);
   return outputBuffer;
 }
-
-// ─────────────────────────────────────────────────────────────
-// PDF
-// ─────────────────────────────────────────────────────────────
-export async function generatePdfBuffer(templateId, data) {
-  console.log('📄 Generating PDF...');
-  const filePath = getTemplateFilePath(templateId);
-  const variables = parseTemplateVariables(filePath);
-  const docxBuffer = await generateDocxBuffer(templateId, data);
-  const pdfBuffer = await convertDocxBufferToPdf(docxBuffer, variables);
-  console.log(`✅ PDF generated: ${pdfBuffer.length} bytes`);
-  return pdfBuffer;
-}
-
-
 
 // import fs from 'fs';
 // import PizZip from 'pizzip';
